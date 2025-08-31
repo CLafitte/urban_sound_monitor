@@ -207,7 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 # Audio recordings and metadata for urban_sound_monitor
-recordings/
+recordings/*
+!recordings/.gitkeep
 *.flac
 *.xml
 

@@ -25,7 +25,13 @@ pip3 install -r requirements.txt
 echo "[INFO] Creating recordings directory..."
 mkdir -p recordings
 
-# --- 6. Setup systemd service (optional) ---
+# --- 6. Add .gitkeep placeholder if missing
+if [ ! -f "recordings/.gitkeep" ]; then
+    touch recordings/.gitkeep
+    echo "[INFO] Added .gitkeep to recordings/"
+fi
+
+# --- 7. Setup systemd service (optional) ---
 SERVICE_FILE="urban_sound_monitor.service"
 if [ -f "$SERVICE_FILE" ]; then
     echo "[INFO] Copying systemd service..."

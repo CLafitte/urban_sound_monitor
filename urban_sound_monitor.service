@@ -1,0 +1,18 @@
+[Unit] Description=Urban Sound Monitor 
+After=network.target sound.target 
+
+[Service] 
+Type=simple 
+ExecStart=/usr/bin/python3/home/pi/urban_sound_monitor/urban_sound_monitor.py 
+WorkingDirectory=/home/pi/urban_sound_monitor 
+Restart=always 
+RestartSec=10 
+StandardOutput=journal 
+StandardError=journal 
+
+# Optional: run as 'pi' user 
+User=pi 
+Group=pi 
+
+[Install] 
+WantedBy=multi-user.target

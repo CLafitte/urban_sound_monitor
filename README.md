@@ -1,10 +1,11 @@
 # Urban Sound Monitor
 
-urban_sound_monitor is a proof-of-concept ambient field noise recorder for Raspberry Pi + USB microphone.  
+urban_sound_monitor is a proof-of-concept ambient field noise recorder for Raspberry Pi using any driverless USB microphone. 
 It captures short bursts of urban sound, computes A-weighted LAeq levels, and saves audio + metadata in a dedicated folder for offline data processing. 
----
+This lightweight program is built for expansion into embedded applications for ecological research and urban planning.
 
 ## Features
+
 
 - Captures 6-second bursts every 60 seconds.
 - Computes A-weighted LAeq (dBFS) per burst.

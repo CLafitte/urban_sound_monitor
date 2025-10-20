@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 urban_sound_monitor.py
-Lightweight ambient noise logger for Raspberry Pi + driverless USB mic.Captures 6-second bursts every 60 seconds, computes LAeq (A-weighted, dBFS), and stores FLAC audio with XML metadata. 
+Lightweight ambient noise logger for Raspberry Pi + driverless USB mic.
+Captures 6-second bursts every 60 seconds, computes LAeq (A-weighted, dBFS),
+and stores FLAC audio with XML metadata.
+Now uses float64 precision throughout DSP for improved low-level accuracy.
 """
 
 import sounddevice as sd
@@ -41,10 +44,13 @@ except RuntimeError as e:
 
 # ---------- FILTERS ----------
 def highpass_filter(x, fs=FS, cutoff=20.0):
+    """Apply 4th-order highpass filter at 20 Hz using float64 precision."""
+    x = x.astype(np.float64, copy=False)
     b, a = butter(4, cutoff/(fs/2), btype='highpass')
     return lfilter(b, a, x)
 
 def a_weighting(fs=FS):
+    """Design digital A-weighting filter for sample rate fs."""
     f1, f2, f3, f4 = 20.598997, 107.65265, 737.86223, 12194.217
     A1000 = 1.9997
     nums = [(2*np.pi*f4)**2 * (10**(A1000/20)), 0, 0, 0, 0]
@@ -59,9 +65,15 @@ B_A, A_A = a_weighting(FS)
 
 # ---------- DSP CORE ----------
 def compute_LAeq(x):
-    """Compute A-weighted equivalent continuous level (dBFS)."""
+    """Compute A-weighted equivalent continuous level (dBFS) in float64."""
+    # Convert to float64 for all DSP math
+    x = x.astype(np.float64, copy=False)
+
+    # Apply highpass and A-weighting filters
     x = highpass_filter(x, FS)
     x = lfilter(B_A, A_A, x)
+
+    # Compute RMS and convert to dBFS
     rms = np.sqrt(np.mean(x**2))
     if rms < 1e-10:
         return -np.inf  # effectively silence
@@ -70,7 +82,8 @@ def compute_LAeq(x):
 # ---------- CAPTURE ----------
 def record_burst():
     """Record a single burst of audio from USB microphone."""
-    rec = sd.rec(int(DURATION * FS), samplerate=FS, channels=1, dtype='float32', device=INPUT_DEVICE)
+    rec = sd.rec(int(DURATION * FS), samplerate=FS, channels=1,
+                 dtype='float32', device=INPUT_DEVICE)
     sd.wait()
     return rec.flatten()
 
@@ -104,12 +117,13 @@ if __name__ == "__main__":
             wav_path = os.path.join(OUTPUT_DIR, f"{timestamp}.flac")
             xml_path = os.path.join(OUTPUT_DIR, f"{timestamp}.xml")
 
-            # Save as FLAC, preserving float32 data
-            sf.write(wav_path, burst, FS, format='FLAC', subtype='PCM_24')  # FLAC supports up to 24-bit
+            # Save as FLAC (float32 to save space)
+            sf.write(wav_path, burst, FS, format='FLAC', subtype='PCM_24')
 
             write_xml(xml_path, wav_path, laeq)
 
-            print(f"[{timestamp}] LAeq (dBFS): {laeq:.2f}" if np.isfinite(laeq) else f"[{timestamp}] Silence detected.")
+            msg = f"[{timestamp}] LAeq (dBFS): {laeq:.2f}" if np.isfinite(laeq) else f"[{timestamp}] Silence detected."
+            print(msg)
 
         except Exception as e:
             print(f"[ERROR] {datetime.utcnow().isoformat()} - {str(e)}")
@@ -117,6 +131,3 @@ if __name__ == "__main__":
         # Wait for the next burst cycle
         sleep_time = max(0, INTERVAL - DURATION)
         time.sleep(sleep_time)
-
-
-

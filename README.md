@@ -11,7 +11,6 @@ This lightweight program is built for expansion into embedded applications for e
 - Computes A-weighted LAeq (dBFS) per burst.
 - Stores audio in FLAC format with XML metadata.
 - Supports dynamic USB microphone detection.
-- Can run unattended via systemd service.
 
 ---
 
@@ -144,5 +143,13 @@ MIT License – see LICENSE file.
 ## Additional Notes
 
 This static, offline recorder box is a proof-of-concept with non-calibrated, non-Type microphones capturing raw, unreferenced data. It is not intended, in its current state, for scientific data collection or research in the service of public policy. 
+
+## Future Work
+
+urban_sound_monitor aims to scale decentralized data collection for ambient noise. This script intends to function as a core for later adaptation to more precise applications: 
+1. heavy-duty, weatherproof, autonymous offline field recording, similar to existing acoustic loggers.
+2. a mobile application to collect ambient sound data continuously from smartphones. This would allow more scalable, decentralized data gathering while preserving the lightweight, low-power design of the current Raspberry Pi implementation.
+
+This project is an offshoot of Connor Lafitte Audio and is in the basic iteration stage. For ideas and feature suggestions, please email connor@connorlafitte.com
 
 ******

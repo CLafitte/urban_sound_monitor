@@ -16,38 +16,39 @@ This lightweight program is built for expansion into embedded applications for e
 
 ## Architecture Overview
 
+## Architecture Overview
 
             +----------------------------+
-             |  Raspberry Pi (OS/ALSA)   |
-             +----------------------------+
-                           |
-                           | systemd reads configuration
-                           v
-             +----------------------------+
-             | urban_sound_monitor.service|  <--- systemd unit
-             |----------------------------|
-             | ExecStart -> runs Python   |
-             | Restart=always, etc.       |
-             +----------------------------+
-                           |
-                           | executes
-                           v
-             +----------------------------+
-             | urban_sound_monitor.py     |  <--- Python script
-             |----------------------------|
-             |  - Records bursts via USB mic
-             |  - Applies high-pass & A-weighting DSP
-             |  - Computes LAeq (dBFS)
-             |  - Saves audio (FLAC) and XML metadata
-             +----------------------------+
-                           |
-            +--------------+--------------+
-            |                             |
-            v                             v
-   +----------------+             +----------------+
-   | recordings/*.flac |          | recordings/*.xml|
-   | Audio files       |          | Metadata logs   |
-   +----------------+             +----------------+
+            |  Raspberry Pi (OS/ALSA)   |
+            +----------------------------+
+                         |
+                         | systemd reads configuration
+                         v
+            +----------------------------+
+            | urban_sound_monitor.service|  <--- systemd unit
+            |----------------------------|
+            | ExecStart -> runs Python   |
+            | Restart=always, etc.       |
+            +----------------------------+
+                         |
+                         | executes
+                         v
+            +----------------------------+
+            | urban_sound_monitor.py     |  <--- Python script
+            |----------------------------|
+            |  - Records bursts via USB mic
+            |  - Applies high-pass & A-weighting DSP
+            |  - Computes LAeq (dBFS)
+            |  - Saves audio (FLAC) and XML metadata
+            +----------------------------+
+                         |
+            +------------+--------------+
+            |                           |
+            v                           v
+       +-------------------------------------+
+       | recordings/*.flac | recordings/*.xml|
+       |   Audio files     | Metadata logs   |
+       +-------------------------------------+
 
 
 ---

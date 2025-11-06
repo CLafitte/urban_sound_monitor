@@ -108,9 +108,63 @@ def write_xml(metadata_path, flac_file, laeq):
     tree.write(tmp_path, encoding="utf-8", xml_declaration=True)
     os.replace(tmp_path, metadata_path)
 
+# ---------- SELF-CHECK ----------
+def self_check():
+    """Perform a quick system check before entering the monitoring loop."""
+    print("[SELF-CHECK] Running preflight diagnostics...")
+
+    results = {"mic": False, "dsp": False, "disk": False}
+
+    # --- Microphone test ---
+    try:
+        test = sd.rec(int(0.5 * FS), samplerate=FS, channels=1,
+                      dtype="float32", device=INPUT_DEVICE)
+        sd.wait()
+        if np.abs(test).max() > 1e-5:
+            results["mic"] = True
+        else:
+            print("[WARN] Microphone captured near-silence. Check input level.")
+    except Exception as e:
+        print(f"[ERROR] Mic test failed: {e}")
+
+    # --- DSP test ---
+    try:
+        test_signal = np.random.randn(int(0.5 * FS)) * 0.01
+        laeq = compute_LAeq(test_signal)
+        if np.isfinite(laeq):
+            results["dsp"] = True
+        else:
+            print("[WARN] DSP pipeline returned NaN or -inf.")
+    except Exception as e:
+        print(f"[ERROR] DSP pipeline failed: {e}")
+
+    # --- Disk test ---
+    try:
+        tmp_flac = os.path.join(OUTPUT_DIR, "_test.flac.tmp")
+        sf.write(tmp_flac, test_signal, FS, format="FLAC", subtype="PCM_24")
+        os.replace(tmp_flac, tmp_flac.replace(".tmp", ""))
+        os.remove(tmp_flac.replace(".tmp", ""))
+        free_mb = os.statvfs(OUTPUT_DIR).f_bavail * os.statvfs(OUTPUT_DIR).f_frsize / 1e6
+        print(f"[INFO] Disk space available: {free_mb:.1f} MB")
+        results["disk"] = True
+    except Exception as e:
+        print(f"[ERROR] Disk write test failed: {e}")
+
+    # --- Summary ---
+    if all(results.values()):
+        print("[SELF-CHECK] PASSED: mic=OK, dsp=OK, disk=OK\n")
+        return True
+    else:
+        print(f"[SELF-CHECK] FAILED: {results}\n")
+        return False
+
 # ---------- MAIN LOOP ----------
 if __name__ == "__main__":
     print("Starting urban sound monitor loop...")
+
+    if not self_check():
+        print("[FATAL] Preflight failed. Exiting.")
+        exit(1)
 
     while True:
         try:

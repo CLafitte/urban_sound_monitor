@@ -27,8 +27,8 @@ This lightweight program is built for expansion into embedded applications for e
             +----------------------------+
             | urban_sound_monitor.service|  <--- systemd unit
             |----------------------------|
-            | ExecStart -> runs Python   |
-            | Restart=always, etc.       |
+            | ExecStart -> runs venv     |
+            | Python, Restart=always     |
             +----------------------------+
                          |
                          | executes
@@ -68,21 +68,21 @@ chmod +x setup.sh
 ./setup.sh
 ```
 This will:
-- Update the Pi
-- Install Python3, pip, and required system libraries
-- Install Python dependencies from requirements.txt
+- Update package lists (a full `apt-get upgrade` is left as a manual, separate step)
+- Install Python3, pip, venv, and required system libraries
+- Create a virtual environment (`venv/`) and install Python dependencies into it from requirements.txt
 - Create the recordings/ folder
 - Optionally copy the systemd service and enable it
 
 ## Systemd Service Setup Notes
 
 The urban_sound_monitor.service allows the script to run automatically on boot.
-Paths: Ensure ExecStart and WorkingDirectory point to where you cloned the repo.
+Paths: Ensure ExecStart and WorkingDirectory point to where you cloned the repo, and ExecStart uses the venv's Python interpreter.
 
 Example:
 
 ```ini
-ExecStart=/usr/bin/python3 /home/pi/urban_sound_monitor/urban_sound_monitor.py
+ExecStart=/home/pi/urban_sound_monitor/venv/bin/python3 /home/pi/urban_sound_monitor/urban_sound_monitor.py
 WorkingDirectory=/home/pi/urban_sound_monitor
 ```
 
@@ -90,7 +90,7 @@ Enable and start service:
 
 ```bash
 sudo cp urban_sound_monitor.service /etc/systemd/system/
-sudo systemctl daemon-reexec
+sudo systemctl daemon-reload
 sudo systemctl enable --now urban_sound_monitor.service
 ```
 
@@ -108,7 +108,7 @@ journalctl -u urban_sound_monitor.service -f
 Run manually for testing:
 
 ```bash
-python3 urban_sound_monitor.py
+venv/bin/python3 urban_sound_monitor.py
 ```
 
 Outputs:
@@ -120,10 +120,19 @@ Outputs:
 
 Each unit should have a unique DEVICE_ID in urban_sound_monitor.py (default `USM-001`).
 This helps differentiate units when running a volunteer network of devices.
- 
+
+## Testing
+
+Unit tests cover the DSP pipeline, device detection, XML metadata writing, and self-check logic. No real microphone or PortAudio installation is required — sounddevice/soundfile are stubbed in conftest.py.
+
+```bash
+venv/bin/pip install -r requirements-dev.txt
+venv/bin/pytest
+```
+
 ## Dependencies
 
-All dependencies are listed in requirements.txt:
+All runtime dependencies are listed in requirements.txt:
 
 ```txt
 sounddevice>=0.4.6
@@ -131,6 +140,8 @@ soundfile>=0.12.1
 numpy>=1.24.0
 scipy>=1.11.0
 ```
+
+Test-only dependencies are listed separately in requirements-dev.txt (pytest), so they aren't installed on deployed units.
 
 System libraries required for ALSA/FLAC support:
 

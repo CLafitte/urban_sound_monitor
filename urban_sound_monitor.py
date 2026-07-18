@@ -23,8 +23,6 @@ DURATION = 6            # seconds per burst
 INTERVAL = 60           # seconds between burst starts
 FS = 48000              # Hz sample rate
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
 # ---------- DEVICE DETECTION ----------
 def find_usb_microphone():
     """Detect first USB microphone input device by name."""
@@ -36,12 +34,6 @@ def find_usb_microphone():
             print(f"[INFO] Using USB mic: {dev['name']} (index {idx})")
             return idx
     raise RuntimeError("No USB microphone detected.")
-
-try:
-    INPUT_DEVICE = find_usb_microphone()
-except RuntimeError as e:
-    print(f"[FATAL] {e}")
-    exit(1)
 
 # ---------- FILTERS ----------
 def highpass_filter(x, fs=FS, cutoff=20.0):
@@ -76,10 +68,10 @@ def compute_LAeq(x):
     return 20 * np.log10(rms)
 
 # ---------- CAPTURE ----------
-def record_burst():
+def record_burst(input_device):
     """Record a single burst of audio from USB microphone."""
     rec = sd.rec(int(DURATION * FS), samplerate=FS, channels=1,
-                 dtype="float32", device=INPUT_DEVICE)
+                 dtype="float32", device=input_device)
     sd.wait()
     return rec.flatten()
 
@@ -109,16 +101,20 @@ def write_xml(metadata_path, flac_file, laeq):
     os.replace(tmp_path, metadata_path)
 
 # ---------- SELF-CHECK ----------
-def self_check():
+def self_check(input_device):
     """Perform a quick system check before entering the monitoring loop."""
     print("[SELF-CHECK] Running preflight diagnostics...")
 
     results = {"mic": False, "dsp": False, "disk": False}
 
+    # Generated once, up front, so a failure in one test can't leave
+    # a later test referencing an undefined variable.
+    test_signal = np.random.randn(int(0.5 * FS)) * 0.01
+
     # --- Microphone test ---
     try:
         test = sd.rec(int(0.5 * FS), samplerate=FS, channels=1,
-                      dtype="float32", device=INPUT_DEVICE)
+                      dtype="float32", device=input_device)
         sd.wait()
         if np.abs(test).max() > 1e-5:
             results["mic"] = True
@@ -129,7 +125,6 @@ def self_check():
 
     # --- DSP test ---
     try:
-        test_signal = np.random.randn(int(0.5 * FS)) * 0.01
         laeq = compute_LAeq(test_signal)
         if np.isfinite(laeq):
             results["dsp"] = True
@@ -159,16 +154,24 @@ def self_check():
         return False
 
 # ---------- MAIN LOOP ----------
-if __name__ == "__main__":
+def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
     print("Starting urban sound monitor loop...")
 
-    if not self_check():
+    try:
+        input_device = find_usb_microphone()
+    except RuntimeError as e:
+        print(f"[FATAL] {e}")
+        exit(1)
+
+    if not self_check(input_device):
         print("[FATAL] Preflight failed. Exiting.")
         exit(1)
 
     while True:
         try:
-            burst = record_burst()
+            burst = record_burst(input_device)
             laeq = compute_LAeq(burst)
 
             timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
@@ -195,3 +198,7 @@ if __name__ == "__main__":
         # Wait for the next burst cycle
         sleep_time = max(0, INTERVAL - DURATION)
         time.sleep(sleep_time)
+
+
+if __name__ == "__main__":
+    main()

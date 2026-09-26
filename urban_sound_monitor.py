@@ -23,6 +23,13 @@ DURATION = 6            # seconds per burst
 INTERVAL = 60           # seconds between burst starts
 FS = 48000              # Hz sample rate
 
+# ---------- LOCATION ----------
+# Static per-deployment values. This unit is assumed stationary; if units
+# become mobile, replace with a GPS read at capture time instead.
+SITE_NAME = "Unnamed Site"     # e.g. "5th & Main - NE corner"
+DEVICE_LAT = 0.0               # decimal degrees, e.g. 41.8781
+DEVICE_LON = 0.0               # decimal degrees, e.g. -87.6298
+
 # ---------- RETENTION ----------
 MAX_STORAGE_MB = 500        # delete oldest bursts once OUTPUT_DIR exceeds this
 RETENTION_CHECK_EVERY = 10  # run the retention sweep every N loop cycles (not every burst)
@@ -87,7 +94,13 @@ def record_burst(input_device):
 def write_xml(metadata_path, flac_file, laeq):
     """Write XML metadata for one burst, atomically to disk."""
     root = ET.Element("NoiseBurst")
-    ET.SubElement(root, "Device", id=DEVICE_ID).text = platform.platform()
+    device = ET.SubElement(root, "Device", id=DEVICE_ID)
+    ET.SubElement(device, "Platform").text = platform.platform()
+
+    location = ET.SubElement(device, "Location")
+    ET.SubElement(location, "SiteName").text = SITE_NAME
+    ET.SubElement(location, "Latitude").text = f"{DEVICE_LAT:.6f}"
+    ET.SubElement(location, "Longitude").text = f"{DEVICE_LON:.6f}"
 
     audio = ET.SubElement(root, "AudioSettings")
     ET.SubElement(audio, "SampleRate").text = str(FS)

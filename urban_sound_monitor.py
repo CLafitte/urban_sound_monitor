@@ -23,6 +23,14 @@ DURATION = 6            # seconds per burst
 INTERVAL = 60           # seconds between burst starts
 FS = 48000              # Hz sample rate
 
+# ---------- RETENTION ----------
+MAX_STORAGE_MB = 500        # delete oldest bursts once OUTPUT_DIR exceeds this
+RETENTION_CHECK_EVERY = 10  # run the retention sweep every N loop cycles (not every burst)
+
+# ---------- MIC RECOVERY ----------
+MIC_FAILURE_THRESHOLD = 3   # consecutive burst failures before attempting re-detection
+MIC_RETRY_BACKOFF = 5       # seconds between re-detection attempts while mic is missing
+
 # ---------- DEVICE DETECTION ----------
 def find_usb_microphone():
     """Detect first USB microphone input device by name."""
@@ -100,6 +108,47 @@ def write_xml(metadata_path, flac_file, laeq):
     tree.write(tmp_path, encoding="utf-8", xml_declaration=True)
     os.replace(tmp_path, metadata_path)
 
+# ---------- RETENTION ----------
+def enforce_retention(output_dir=OUTPUT_DIR, max_mb=MAX_STORAGE_MB):
+    """Delete oldest (flac, xml) burst pairs until directory usage is under max_mb.
+
+    Pairs are matched by shared basename (timestamp) so a burst's audio and
+    metadata are always removed together, never orphaning one or the other.
+    """
+    try:
+        entries = os.listdir(output_dir)
+    except OSError as e:
+        print(f"[WARN] Retention check could not list {output_dir}: {e}")
+        return
+
+    flacs = {os.path.splitext(f)[0]: f for f in entries if f.endswith(".flac")}
+    xmls = {os.path.splitext(f)[0]: f for f in entries if f.endswith(".xml")}
+    stems = sorted(
+        set(flacs) & set(xmls),
+        key=lambda s: os.path.getmtime(os.path.join(output_dir, flacs[s])),
+    )
+
+    all_files = list(flacs.values()) + list(xmls.values())
+    usage = sum(os.path.getsize(os.path.join(output_dir, f)) for f in all_files) / 1e6
+    if usage <= max_mb:
+        return
+
+    print(f"[INFO] Retention: {usage:.1f} MB used, over {max_mb} MB limit — trimming oldest bursts")
+    removed = 0
+    for stem in stems:
+        if usage <= max_mb:
+            break
+        for fname in (flacs[stem], xmls[stem]):
+            path = os.path.join(output_dir, fname)
+            try:
+                size = os.path.getsize(path)
+                os.remove(path)
+                usage -= size / 1e6
+            except OSError as e:
+                print(f"[WARN] Could not remove {path}: {e}")
+        removed += 1
+    print(f"[INFO] Retention: removed {removed} burst(s), now ~{usage:.1f} MB")
+
 # ---------- SELF-CHECK ----------
 def self_check(input_device):
     """Perform a quick system check before entering the monitoring loop."""
@@ -154,20 +203,29 @@ def self_check(input_device):
         return False
 
 # ---------- MAIN LOOP ----------
+def acquire_device():
+    """Block, retrying with backoff, until a USB microphone is found."""
+    while True:
+        try:
+            return find_usb_microphone()
+        except RuntimeError as e:
+            print(f"[WARN] {e} — retrying in {MIC_RETRY_BACKOFF}s")
+            time.sleep(MIC_RETRY_BACKOFF)
+
+
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     print("Starting urban sound monitor loop...")
 
-    try:
-        input_device = find_usb_microphone()
-    except RuntimeError as e:
-        print(f"[FATAL] {e}")
-        exit(1)
+    input_device = acquire_device()
 
     if not self_check(input_device):
         print("[FATAL] Preflight failed. Exiting.")
         exit(1)
+
+    consecutive_failures = 0
+    cycle_count = 0
 
     while True:
         try:
@@ -191,9 +249,23 @@ def main():
                 else f"[{timestamp}] Silence detected."
             )
             print(msg)
+            consecutive_failures = 0
 
         except Exception as e:
-            print(f"[ERROR] {datetime.utcnow().isoformat()} - {str(e)}")
+            consecutive_failures += 1
+            print(f"[ERROR] {datetime.utcnow().isoformat()} - {str(e)} "
+                  f"(consecutive failures: {consecutive_failures})")
+
+            if consecutive_failures >= MIC_FAILURE_THRESHOLD:
+                print("[WARN] Repeated capture failures — assuming the microphone "
+                      "was disconnected. Attempting re-detection...")
+                input_device = acquire_device()
+                print("[INFO] Microphone re-acquired. Resuming monitoring.")
+                consecutive_failures = 0
+
+        cycle_count += 1
+        if cycle_count % RETENTION_CHECK_EVERY == 0:
+            enforce_retention()
 
         # Wait for the next burst cycle
         sleep_time = max(0, INTERVAL - DURATION)

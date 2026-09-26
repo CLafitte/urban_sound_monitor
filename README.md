@@ -121,6 +121,10 @@ Outputs:
 Each unit should have a unique DEVICE_ID in urban_sound_monitor.py (default `USM-001`).
 This helps differentiate units when running a volunteer network of devices.
 
+## Location
+
+Each unit is stationary and geotagged via SITE_NAME, DEVICE_LAT, and DEVICE_LON in the config block, so every recorded burst carries the location needed to aggregate readings across sites into hotspot maps. **Set these variables these before first run** or the script will refuse to start.
+
 ## Testing
 
 Unit tests cover the DSP pipeline, device detection, XML metadata writing, and self-check logic. No real microphone or PortAudio installation is required — sounddevice/soundfile are stubbed in conftest.py.

@@ -11,6 +11,7 @@ import soundfile as sf
 import numpy as np
 from scipy.signal import bilinear, lfilter, butter
 import xml.etree.ElementTree as ET
+import csv
 from datetime import datetime
 import platform
 import os
@@ -30,6 +31,10 @@ SITE_NAME = "Unnamed Site"     # e.g. "5th & Main - NE corner"
 DEVICE_LAT = 0.0               # decimal degrees, e.g. 41.8781
 DEVICE_LON = 0.0               # decimal degrees, e.g. -87.6298
 
+# ---------- CSV INDEX ----------
+CSV_INDEX_FILENAME = "index.csv"   # per-unit running summary of all bursts
+CSV_FIELDS = ["timestamp", "site_name", "latitude", "longitude", "laeq_dbfs", "flac_file"]
+
 # ---------- RETENTION ----------
 MAX_STORAGE_MB = 500        # delete oldest bursts once OUTPUT_DIR exceeds this
 RETENTION_CHECK_EVERY = 10  # run the retention sweep every N loop cycles (not every burst)
@@ -37,6 +42,27 @@ RETENTION_CHECK_EVERY = 10  # run the retention sweep every N loop cycles (not e
 # ---------- MIC RECOVERY ----------
 MIC_FAILURE_THRESHOLD = 3   # consecutive burst failures before attempting re-detection
 MIC_RETRY_BACKOFF = 5       # seconds between re-detection attempts while mic is missing
+
+# ---------- CONFIG VALIDATION ----------
+def validate_location_config():
+    """Refuse to run with placeholder location values.
+
+    A unit left at defaults would silently tag every burst with a fake
+    site name and (0, 0) coordinates, polluting any downstream hotspot
+    analysis with unattributable data. Fail loudly instead.
+    """
+    problems = []
+    if SITE_NAME == "Unnamed Site":
+        problems.append("SITE_NAME is still the placeholder value")
+    if DEVICE_LAT == 0.0 and DEVICE_LON == 0.0:
+        problems.append("DEVICE_LAT/DEVICE_LON are still 0.0, 0.0")
+
+    if problems:
+        print("[FATAL] Location config not set for this deployment:")
+        for p in problems:
+            print(f"  - {p}")
+        print("  Set SITE_NAME, DEVICE_LAT, and DEVICE_LON before running.")
+        exit(1)
 
 # ---------- DEVICE DETECTION ----------
 def find_usb_microphone():
@@ -91,6 +117,7 @@ def record_burst(input_device):
     return rec.flatten()
 
 # ---------- XML LOGGING ----------
+def write_xml(metadata_path, flac_file, laeq, timestamp):
 def write_xml(metadata_path, flac_file, laeq):
     """Write XML metadata for one burst, atomically to disk."""
     root = ET.Element("NoiseBurst")
@@ -108,6 +135,7 @@ def write_xml(metadata_path, flac_file, laeq):
     ET.SubElement(audio, "BitDepth").text = "FLAC (PCM_24)"
 
     session = ET.SubElement(root, "Session")
+    ET.SubElement(session, "Timestamp").text = timestamp
     now = datetime.utcnow().isoformat() + "Z"
     ET.SubElement(session, "Timestamp").text = now
     ET.SubElement(session, "FlacFile").text = flac_file
@@ -120,6 +148,29 @@ def write_xml(metadata_path, flac_file, laeq):
     tmp_path = metadata_path + ".tmp"
     tree.write(tmp_path, encoding="utf-8", xml_declaration=True)
     os.replace(tmp_path, metadata_path)
+
+# ---------- CSV INDEX ----------
+def append_csv_index(output_dir, timestamp, laeq, flac_path):
+    """Append one row summarizing this burst to the per-unit CSV index.
+
+    Writes the header once, on first creation. This is a flat, greppable
+    summary alongside the detailed per-burst XML/FLAC files — not a
+    replacement for them.
+    """
+    csv_path = os.path.join(output_dir, CSV_INDEX_FILENAME)
+    write_header = not os.path.exists(csv_path)
+    with open(csv_path, "a", newline="") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(CSV_FIELDS)
+        writer.writerow([
+            timestamp,
+            SITE_NAME,
+            f"{DEVICE_LAT:.6f}",
+            f"{DEVICE_LON:.6f}",
+            f"{laeq:.2f}" if np.isfinite(laeq) else "NaN",
+            os.path.basename(flac_path),
+        ])
 
 # ---------- RETENTION ----------
 def enforce_retention(output_dir=OUTPUT_DIR, max_mb=MAX_STORAGE_MB):
@@ -227,6 +278,8 @@ def acquire_device():
 
 
 def main():
+    validate_location_config()
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     print("Starting urban sound monitor loop...")
@@ -253,6 +306,13 @@ def main():
             tmp_flac = flac_path + ".tmp"
             sf.write(tmp_flac, burst, FS, format="FLAC", subtype="PCM_24")
             os.replace(tmp_flac, flac_path)
+
+            write_xml(xml_path, flac_path, laeq, timestamp)
+
+            try:
+                append_csv_index(OUTPUT_DIR, timestamp, laeq, flac_path)
+            except OSError as e:
+                print(f"[WARN] Could not update CSV index: {e}")
 
             write_xml(xml_path, flac_path, laeq)
 

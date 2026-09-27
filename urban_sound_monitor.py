@@ -118,6 +118,7 @@ def record_burst(input_device):
 
 # ---------- XML LOGGING ----------
 def write_xml(metadata_path, flac_file, laeq, timestamp):
+def write_xml(metadata_path, flac_file, laeq):
     """Write XML metadata for one burst, atomically to disk."""
     root = ET.Element("NoiseBurst")
     device = ET.SubElement(root, "Device", id=DEVICE_ID)
@@ -135,6 +136,8 @@ def write_xml(metadata_path, flac_file, laeq, timestamp):
 
     session = ET.SubElement(root, "Session")
     ET.SubElement(session, "Timestamp").text = timestamp
+    now = datetime.utcnow().isoformat() + "Z"
+    ET.SubElement(session, "Timestamp").text = now
     ET.SubElement(session, "FlacFile").text = flac_file
     ET.SubElement(session, "Duration").text = str(DURATION)
     ET.SubElement(session, "LAeq_dBFS").text = (
@@ -310,6 +313,8 @@ def main():
                 append_csv_index(OUTPUT_DIR, timestamp, laeq, flac_path)
             except OSError as e:
                 print(f"[WARN] Could not update CSV index: {e}")
+
+            write_xml(xml_path, flac_path, laeq)
 
             msg = (
                 f"[{timestamp}] LAeq (dBFS): {laeq:.2f}"

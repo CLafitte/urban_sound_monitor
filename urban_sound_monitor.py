@@ -4,18 +4,22 @@ urban_sound_monitor.py
 Lightweight ambient noise logger for Raspberry Pi + driverless USB mic.
 Captures 6-second bursts every 60 seconds, computes LAeq (A-weighted, dBFS),
 and stores FLAC audio with XML metadata.
+
+Signal processing (high-pass, A-weighting, LAeq) lives in dsp.py so it can be
+unit tested without audio hardware. See tests/test_dsp.py.
 """
 
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
-from scipy.signal import bilinear, lfilter, butter
 import xml.etree.ElementTree as ET
 import csv
 from datetime import datetime
 import platform
 import os
 import time
+
+from dsp import compute_LAeq
 
 # ---------- CONFIG ----------
 DEVICE_ID = "USM-001"
@@ -75,38 +79,6 @@ def find_usb_microphone():
             print(f"[INFO] Using USB mic: {dev['name']} (index {idx})")
             return idx
     raise RuntimeError("No USB microphone detected.")
-
-# ---------- FILTERS ----------
-def highpass_filter(x, fs=FS, cutoff=20.0):
-    """Apply 4th-order highpass filter at 20 Hz using float64 precision."""
-    x = x.astype(np.float64, copy=False)
-    b, a = butter(4, cutoff / (fs / 2), btype="highpass")
-    return lfilter(b, a, x)
-
-def a_weighting(fs=FS):
-    """Design digital A-weighting filter for sample rate fs."""
-    f1, f2, f3, f4 = 20.598997, 107.65265, 737.86223, 12194.217
-    A1000 = 1.9997
-    nums = [(2 * np.pi * f4) ** 2 * (10 ** (A1000 / 20)), 0, 0, 0, 0]
-    dens = np.polymul([1, 4 * np.pi * f4, (2 * np.pi * f4) ** 2],
-                      [1, 4 * np.pi * f1, (2 * np.pi * f1) ** 2])
-    dens = np.polymul(np.polymul(dens, [1, 2 * np.pi * f3]),
-                      [1, 2 * np.pi * f2])
-    b, a = bilinear(nums, dens, fs)
-    return b, a
-
-B_A, A_A = a_weighting(FS)
-
-# ---------- DSP CORE ----------
-def compute_LAeq(x):
-    """Compute A-weighted equivalent continuous level (dBFS) in float64."""
-    x = x.astype(np.float64, copy=False)
-    x = highpass_filter(x, FS)
-    x = np.asarray(lfilter(B_A, A_A, x), dtype=np.float64)
-    rms = np.sqrt(np.mean(x ** 2))
-    if rms < 1e-10:
-        return -np.inf  # effectively silence
-    return 20 * np.log10(rms)
 
 # ---------- CAPTURE ----------
 def record_burst(input_device):
@@ -235,7 +207,7 @@ def self_check(input_device):
 
     # --- DSP test ---
     try:
-        laeq = compute_LAeq(test_signal)
+        laeq = compute_LAeq(test_signal, FS)
         if np.isfinite(laeq):
             results["dsp"] = True
         else:
@@ -293,7 +265,7 @@ def main():
     while True:
         try:
             burst = record_burst(input_device)
-            laeq = compute_LAeq(burst)
+            laeq = compute_LAeq(burst, FS)
 
             timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
             flac_path = os.path.join(OUTPUT_DIR, f"{timestamp}.flac")

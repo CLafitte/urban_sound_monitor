@@ -1,171 +1,99 @@
 # Urban Sound Monitor
 
-urban_sound_monitor is a proof-of-concept ambient field noise recorder for Raspberry Pi using any driverless USB microphone. 
-It captures short bursts of urban sound, computes A-weighted LAeq levels, and saves audio + metadata in a dedicated folder for offline data processing. 
-This lightweight program is built for expansion into embedded applications for ecological research and urban planning.
+A proof-of-concept ambient field noise recorder for Raspberry Pi using any driverless USB microphone. It captures short bursts of urban sound, computes A-weighted LAeq levels, and saves audio and metadata for offline processing. Built for expansion into embedded applications for ecological research and urban planning.
 
 ## Features
 
+- Captures 6-second bursts every 60 seconds
+- Computes A-weighted LAeq (dBFS) per burst
+- Stores FLAC audio with XML metadata
+- Detects USB microphones dynamically
 
-- Captures 6-second bursts every 60 seconds.
-- Computes A-weighted LAeq (dBFS) per burst.
-- Stores audio in FLAC format with XML metadata.
-- Supports dynamic USB microphone detection.
+## Architecture
 
----
-
-## Architecture Overview
-
-## Architecture Overview
-
-            +----------------------------+
-            |  Raspberry Pi (OS/ALSA)   |
-            +----------------------------+
-                         |
-                         | systemd reads configuration
-                         v
-            +----------------------------+
-            | urban_sound_monitor.service|  <--- systemd unit
-            |----------------------------|
-            | ExecStart -> runs venv     |
-            | Python, Restart=always     |
-            +----------------------------+
-                         |
-                         | executes
-                         v
-            +----------------------------+
-            | urban_sound_monitor.py     |  <--- Python script
-            |----------------------------|
-            |  - Records bursts via USB mic
-            |  - Applies high-pass & A-weighting DSP
-            |  - Computes LAeq (dBFS)
-            |  - Saves audio (FLAC) and XML metadata
-            +----------------------------+
-                         |
-            +------------+--------------+
-            |                           |
-            v                           v
-       +-------------------------------------+
-       | recordings/*.flac | recordings/*.xml|
-       |   Audio files     | Metadata logs   |
-       +-------------------------------------+
-
-
----
+```
+systemd: urban_sound_monitor.service (venv Python, Restart=always)
+   |
+   v
+urban_sound_monitor.py -- capture, self-check, file output
+   |                  \
+   | calls             v
+   v               recordings/*.flac + *.xml
+dsp.py -- high-pass, A-weighting, LAeq (no hardware imports)
+   ^
+   | tested by
+tests/test_dsp.py -- pytest, no microphone needed
+```
 
 ## Installation
-
-1. Clone the repository:
 
 ```bash
 git clone https://github.com/<your-username>/urban_sound_monitor.git
 cd urban_sound_monitor
+chmod +x setup.sh && ./setup.sh
 ```
-2. Run the setup script:
 
-```bash
-chmod +x setup.sh
-./setup.sh
-```
-This will:
-- Update package lists (a full `apt-get upgrade` is left as a manual, separate step)
-- Install Python3, pip, venv, and required system libraries
-- Create a virtual environment (`venv/`) and install Python dependencies into it from requirements.txt
-- Create the recordings/ folder
-- Optionally copy the systemd service and enable it
+The setup script updates package lists (a full `apt-get upgrade` stays a manual step), installs Python3, pip, venv and system libraries, creates `venv/` with the dependencies from requirements.txt plus the recordings/ folder, and optionally installs and enables the systemd service.
 
-## Systemd Service Setup Notes
+## Systemd Service
 
-The urban_sound_monitor.service allows the script to run automatically on boot.
-Paths: Ensure ExecStart and WorkingDirectory point to where you cloned the repo, and ExecStart uses the venv's Python interpreter.
-
-Example:
+The service runs the script on boot and restarts it if it crashes. Point ExecStart and WorkingDirectory at your clone, using the venv's Python. `dsp.py` must sit beside the script.
 
 ```ini
 ExecStart=/home/pi/urban_sound_monitor/venv/bin/python3 /home/pi/urban_sound_monitor/urban_sound_monitor.py
 WorkingDirectory=/home/pi/urban_sound_monitor
 ```
 
-Enable and start service:
-
 ```bash
 sudo cp urban_sound_monitor.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now urban_sound_monitor.service
+journalctl -u urban_sound_monitor.service -f   # logs
 ```
-
-Check logs:
-
-```bash
-journalctl -u urban_sound_monitor.service -f
-```
-
-- The service automatically restarts if the script crashes.
-- See inline comments in urban_sound_monitor.service for fine-tuning. 
 
 ## Usage
 
-Run manually for testing:
+Run manually with `venv/bin/python3 urban_sound_monitor.py`. Each burst writes `recordings/<timestamp>.flac` (audio) and `recordings/<timestamp>.xml` (device ID, timestamp, duration, LAeq).
 
-```bash
-venv/bin/python3 urban_sound_monitor.py
-```
+## Configuration
 
-Outputs:
+Edit the config block in urban_sound_monitor.py:
 
-`recordings/<timestamp>.flac` → Audio file
-`recordings/<timestamp>.xml` → Metadata including device ID, timestamp, duration, LAeq
-
-## Device ID
-
-Each unit should have a unique DEVICE_ID in urban_sound_monitor.py (default `USM-001`).
-This helps differentiate units when running a volunteer network of devices.
-
-## Location
-
-Each unit is stationary and geotagged via SITE_NAME, DEVICE_LAT, and DEVICE_LON in the config block, so every recorded burst carries the location needed to aggregate readings across sites into hotspot maps. **Set these variables these before first run** or the script will refuse to start.
+- `DEVICE_ID`: unique per unit (default `USM-001`), to tell units apart in a volunteer network.
+- `SITE_NAME`, `DEVICE_LAT`, `DEVICE_LON`: units are stationary and geotagged so readings aggregate into hotspot maps. **Set these before first run** or the script refuses to start.
 
 ## Testing
 
-Unit tests cover the DSP pipeline, device detection, XML metadata writing, and self-check logic. No real microphone or PortAudio installation is required — sounddevice/soundfile are stubbed in conftest.py.
+`tests/test_dsp.py` checks A-weighting against IEC 61672 reference values, level scaling, silence, DC rejection and float32 input. No microphone or PortAudio is required.
 
 ```bash
 venv/bin/pip install -r requirements-dev.txt
 venv/bin/pytest
 ```
 
+Known limits: 8 kHz reads about 0.6 dB low (bilinear warping), and filter state resets every burst, causing a startup transient.
+
 ## Dependencies
 
-All runtime dependencies are listed in requirements.txt:
-
-```txt
-sounddevice>=0.4.6
-soundfile>=0.12.1
-numpy>=1.24.0
-scipy>=1.11.0
-```
-
-Test-only dependencies are listed separately in requirements-dev.txt (pytest), so they aren't installed on deployed units.
-
-System libraries required for ALSA/FLAC support:
+requirements.txt holds runtime packages (sounddevice, soundfile, numpy, scipy). requirements-dev.txt adds pytest and isn't needed on deployed units. System libraries for ALSA/FLAC:
 
 ```bash
 sudo apt-get install -y libasound2-dev libsndfile1-dev
 ```
 
 ## License
+
 MIT License – see LICENSE file.
 
 ## Additional Notes
 
-This static, offline recorder box is a proof-of-concept with non-calibrated, non-Type microphones capturing raw, unreferenced data. It is not intended, in its current state, for scientific data collection or research in the service of public policy. 
+This static, offline recorder is a proof-of-concept with non-calibrated, non-Type microphones capturing raw, unreferenced data. In its current state it is not intended for scientific data collection or research in the service of public policy.
 
 ## Future Work
 
-urban_sound_monitor aims to scale decentralized data collection for ambient noise. This script intends to function as a core for later adaptation to more precise applications: 
-1. heavy-duty, weatherproof, autonymous offline field recording, similar to existing acoustic loggers.
-2. a mobile application to collect ambient sound data continuously from smartphones. This would allow more scalable, decentralized data gathering while preserving the lightweight, low-power design of the current Raspberry Pi implementation.
+urban_sound_monitor aims to scale decentralized ambient noise collection, as a core for more precise applications:
+
+1. Heavy-duty, weatherproof, autonomous offline field recorders, similar to existing acoustic loggers.
+2. A mobile app collecting ambient sound continuously from smartphones, for more scalable, decentralized gathering while keeping the low-power design of the Raspberry Pi version.
 
 This project is an offshoot of Connor Lafitte Audio and is in the basic iteration stage. For ideas and feature suggestions, please email connor@connorlafitte.com
-
-******
